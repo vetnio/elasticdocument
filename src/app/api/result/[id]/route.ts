@@ -197,7 +197,6 @@ export async function GET(
         // Step 3: Summarize with Claude (streaming)
         send({ type: "status", message: "Summarizing and restructuring..." });
 
-        const wordCount = combinedMarkdown.split(/\s+/).length;
         let fullOutput = "";
 
         const summaryStream = streamSummary({
@@ -206,7 +205,6 @@ export async function GET(
           readingMinutes: result.readingMinutes,
           complexity: result.complexityLevel,
           language: result.outputLanguage,
-          originalWordCount: wordCount,
         });
 
         for await (const chunk of summaryStream) {

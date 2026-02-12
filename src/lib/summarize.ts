@@ -8,7 +8,6 @@ interface SummarizeParams {
   readingMinutes: number;
   complexity: string;
   language: string;
-  originalWordCount: number;
 }
 
 function getComplexityInstruction(complexity: string): string {
@@ -26,10 +25,7 @@ function getComplexityInstruction(complexity: string): string {
 
 export function buildPrompt(params: SummarizeParams): string {
   const wordsPerMinute = 230;
-  const targetWords = Math.min(
-    params.readingMinutes * wordsPerMinute,
-    params.originalWordCount
-  );
+  const targetWords = params.readingMinutes * wordsPerMinute;
 
   const complexityInstruction = getComplexityInstruction(params.complexity);
 
