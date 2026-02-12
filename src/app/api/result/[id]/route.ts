@@ -1,0 +1,267 @@
+import { NextRequest } from "next/server";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+import { db } from "@/lib/db";
+import { document, processedResult } from "@/lib/db/schema";
+import { eq, and, sql } from "drizzle-orm";
+import { runOcr } from "@/lib/ocr";
+import { scrapeUrl } from "@/lib/url-scraper";
+import { streamSummary } from "@/lib/summarize";
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+
+  if (!session) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  const result = await db.query.processedResult.findFirst({
+    where: and(eq(processedResult.id, id), eq(processedResult.userId, session.user.id)),
+    with: { documentToProcessedResults: { with: { document: true } } },
+  });
+
+  if (!result) {
+    return new Response("Not found", { status: 404 });
+  }
+
+  const documents = result.documentToProcessedResults.map((r) => r.document);
+
+  // If already processed, return the stored content
+  if (result.outputContent) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "status", message: "Complete" })}\n\n`)
+        );
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "content", text: result.outputContent })}\n\n`)
+        );
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "images", images: result.outputImages })}\n\n`)
+        );
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`)
+        );
+        controller.close();
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  }
+
+  // Atomically claim this result for processing to prevent concurrent runs.
+  // Only succeeds if markdownContent is still empty (not already being processed).
+  const PROCESSING_SENTINEL = "__processing__";
+  const claimed = await db
+    .update(processedResult)
+    .set({ markdownContent: PROCESSING_SENTINEL })
+    .where(
+      and(
+        eq(processedResult.id, result.id),
+        eq(processedResult.markdownContent, ""),
+      )
+    )
+    .returning({ id: processedResult.id });
+
+  // If markdownContent was already non-empty (another request claimed it, or reprocessing has content),
+  // check what's going on
+  if (claimed.length === 0 && !result.markdownContent) {
+    // Another request is already processing
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "status", message: "Already processing in another request. Please wait..." })}\n\n`)
+        );
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`)
+        );
+        controller.close();
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  }
+
+  // Process documents with streaming
+  const abortSignal = request.signal;
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      // Keep connection alive during long OCR operations
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(": heartbeat\n\n"));
+        } catch {
+          // Controller already closed
+          clearInterval(heartbeat);
+        }
+      }, 15_000);
+
+      // Stop processing early if client disconnects
+      function onAbort() {
+        clearInterval(heartbeat);
+        try { controller.close(); } catch { /* already closed */ }
+      }
+      abortSignal.addEventListener("abort", onAbort, { once: true });
+
+      try {
+        const send = (data: object) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        };
+
+        let combinedMarkdown = result.markdownContent === PROCESSING_SENTINEL ? "" : result.markdownContent;
+        let allImages = [...result.extractedImages];
+
+        // Skip OCR if markdown already exists (e.g., reprocessing)
+        if (!combinedMarkdown) {
+          // Step 1: Scrape URLs
+          const urlDocs = documents.filter((d) => d.isUrl);
+          if (urlDocs.length > 0) {
+            send({ type: "status", message: "Fetching web pages..." });
+            for (const doc of urlDocs) {
+              if (abortSignal.aborted) return;
+              if (doc.sourceUrl) {
+                try {
+                  const scraped = await scrapeUrl(doc.sourceUrl, session.user.id);
+                  await db
+                    .update(document)
+                    .set({ blobUrl: scraped.blobUrl, fileName: scraped.fileName })
+                    .where(eq(document.id, doc.id));
+                  doc.blobUrl = scraped.blobUrl;
+                } catch (err) {
+                  send({ type: "error", message: `Failed to fetch ${doc.sourceUrl}: ${err instanceof Error ? err.message : "Unknown error"}` });
+                }
+              }
+            }
+          }
+
+          if (abortSignal.aborted) return;
+
+          // Step 2: OCR all documents
+          send({ type: "status", message: "Extracting text and images..." });
+          combinedMarkdown = "";
+          allImages = [];
+
+          for (const doc of documents) {
+            if (abortSignal.aborted) return;
+            if (!doc.blobUrl) continue;
+            try {
+              const ocrResult = await runOcr(doc.blobUrl);
+              combinedMarkdown += `\n\n--- ${doc.fileName} ---\n\n${ocrResult.markdown}`;
+              allImages.push(...ocrResult.images);
+            } catch (err) {
+              send({ type: "error", message: `OCR failed for ${doc.fileName}: ${err instanceof Error ? err.message : "Unknown error"}` });
+            }
+          }
+
+          if (!combinedMarkdown.trim()) {
+            send({ type: "error", message: "No content could be extracted from the documents" });
+            send({ type: "done" });
+            clearInterval(heartbeat);
+            controller.close();
+            return;
+          }
+
+          // Update the result with extracted markdown and images
+          await db
+            .update(processedResult)
+            .set({
+              markdownContent: combinedMarkdown,
+              extractedImages: allImages,
+            })
+            .where(eq(processedResult.id, result.id));
+        }
+
+        if (abortSignal.aborted) return;
+
+        // Step 3: Summarize with Claude (streaming)
+        send({ type: "status", message: "Summarizing and restructuring..." });
+
+        const wordCount = combinedMarkdown.split(/\s+/).length;
+        let fullOutput = "";
+
+        const summaryStream = streamSummary({
+          markdown: combinedMarkdown,
+          images: allImages,
+          readingMinutes: result.readingMinutes,
+          complexity: result.complexityLevel,
+          language: result.outputLanguage,
+          originalWordCount: wordCount,
+        });
+
+        for await (const chunk of summaryStream) {
+          if (abortSignal.aborted) return;
+          fullOutput += chunk;
+          send({ type: "chunk", text: chunk });
+        }
+
+        // Find which images were referenced in the output
+        const usedImages = allImages.filter((img) => fullOutput.includes(img));
+
+        // Save the final output
+        await db
+          .update(processedResult)
+          .set({
+            outputContent: fullOutput,
+            outputImages: usedImages,
+          })
+          .where(eq(processedResult.id, result.id));
+
+        send({ type: "done" });
+        clearInterval(heartbeat);
+        abortSignal.removeEventListener("abort", onAbort);
+        controller.close();
+      } catch (err) {
+        // Reset sentinel so the result can be retried
+        await db
+          .update(processedResult)
+          .set({ markdownContent: "" })
+          .where(
+            and(
+              eq(processedResult.id, result.id),
+              eq(processedResult.markdownContent, PROCESSING_SENTINEL),
+            )
+          );
+        if (abortSignal.aborted) return;
+        const errorMessage = err instanceof Error ? err.message : "Processing failed";
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "error", message: errorMessage })}\n\n`)
+        );
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`)
+        );
+        clearInterval(heartbeat);
+        abortSignal.removeEventListener("abort", onAbort);
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
+}
