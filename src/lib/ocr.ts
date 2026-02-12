@@ -124,7 +124,7 @@ export async function runOcr(fileUrl: string): Promise<OcrResult> {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "tgi",
+        model: "rednote-hilab/dots.ocr",
         messages: [
           {
             role: "user",
