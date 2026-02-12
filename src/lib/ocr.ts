@@ -1,9 +1,12 @@
+import * as mupdf from "mupdf";
+
 export interface OcrResult {
   markdown: string;
   images: string[];
 }
 
 const OCR_TIMEOUT_MS = 120_000;
+const MAX_PDF_PAGES = 50;
 
 const DOTS_OCR_PROMPT = `Please output the layout information from the PDF image, including each layout element's bbox, its category, and the corresponding text content within the bbox.
 
@@ -91,6 +94,83 @@ function detectMimeType(contentType: string | null, url: string): string {
   return "image/jpeg";
 }
 
+/** Convert a PDF buffer into an array of PNG page images using MuPDF WASM. */
+function pdfToImages(pdfBuffer: Buffer): Buffer[] {
+  const doc = mupdf.Document.openDocument(pdfBuffer, "application/pdf");
+  const pageCount = Math.min(doc.countPages(), MAX_PDF_PAGES);
+  const images: Buffer[] = [];
+
+  for (let i = 0; i < pageCount; i++) {
+    const page = doc.loadPage(i);
+    // Scale 2x (≈200 DPI) for optimal OCR quality per model docs
+    const pixmap = page.toPixmap(
+      [2, 0, 0, 2, 0, 0],
+      mupdf.ColorSpace.DeviceRGB,
+      false,
+      true,
+    );
+    images.push(Buffer.from(pixmap.asPNG()));
+  }
+
+  return images;
+}
+
+/** Send a single image buffer to the dots.ocr endpoint and parse the response. */
+async function ocrSingleImage(
+  base64Content: string,
+  mimeType: string,
+  apiUrl: string,
+  apiKey: string,
+  signal: AbortSignal,
+): Promise<OcrResult> {
+  const dataUri = `data:${mimeType};base64,${base64Content}`;
+
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "rednote-hilab/dots.ocr",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: dataUri } },
+            { type: "text", text: DOTS_OCR_PROMPT },
+          ],
+        },
+      ],
+      max_tokens: 24000,
+      stream: false,
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OCR failed (${response.status}): ${errorText}`);
+  }
+
+  const result = await response.json();
+  const content: string = result.choices?.[0]?.message?.content ?? "";
+
+  // Try to parse structured JSON, fall back to raw text
+  try {
+    const jsonStr = content.replace(/^```json\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
+    const parsed = JSON.parse(jsonStr);
+    const elements: LayoutElement[] = parsed.layout_elements ?? parsed;
+    if (Array.isArray(elements)) {
+      return layoutToMarkdown(elements);
+    }
+  } catch {
+    // JSON parsing failed — use raw content as markdown
+  }
+
+  return { markdown: content, images: [] };
+}
+
 export async function runOcr(fileUrl: string): Promise<OcrResult> {
   const endpoint = process.env.HUGGINGFACE_OCR_ENDPOINT;
   const apiKey = process.env.HUGGINGFACE_API_KEY;
@@ -110,67 +190,34 @@ export async function runOcr(fileUrl: string): Promise<OcrResult> {
     }
 
     const mimeType = detectMimeType(fileResponse.headers.get("content-type"), fileUrl);
-    const fileBuffer = await fileResponse.arrayBuffer();
-    const base64Content = Buffer.from(fileBuffer).toString("base64");
-    const dataUri = `data:${mimeType};base64,${base64Content}`;
-
-    // Call the HF Inference Endpoint using OpenAI-compatible chat completions API
+    const fileBuffer = Buffer.from(await fileResponse.arrayBuffer());
     const apiUrl = endpoint.replace(/\/+$/, "") + "/v1/chat/completions";
 
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "rednote-hilab/dots.ocr",
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image_url",
-                image_url: { url: dataUri },
-              },
-              {
-                type: "text",
-                text: DOTS_OCR_PROMPT,
-              },
-            ],
-          },
-        ],
-        max_tokens: 24000,
-        stream: false,
-      }),
-      signal: controller.signal,
-    });
+    // PDFs: convert each page to a PNG image, OCR each page separately
+    if (mimeType === "application/pdf") {
+      const pageImages = pdfToImages(fileBuffer);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`OCR failed (${response.status}): ${errorText}`);
-    }
-
-    const result = await response.json();
-
-    // Extract the model's text output from the chat completions response
-    const content: string = result.choices?.[0]?.message?.content ?? "";
-
-    // The model returns a JSON object with layout_elements
-    // Try to parse it, falling back to raw text if parsing fails
-    try {
-      // The content may be wrapped in ```json ... ``` code fences
-      const jsonStr = content.replace(/^```json\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
-      const parsed = JSON.parse(jsonStr);
-      const elements: LayoutElement[] = parsed.layout_elements ?? parsed;
-      if (Array.isArray(elements)) {
-        return layoutToMarkdown(elements);
+      if (pageImages.length === 0) {
+        throw new Error("PDF has no pages");
       }
-    } catch {
-      // JSON parsing failed — use raw content as markdown
+
+      let combinedMarkdown = "";
+      const allImages: string[] = [];
+
+      for (let i = 0; i < pageImages.length; i++) {
+        if (controller.signal.aborted) break;
+        const pageBase64 = pageImages[i].toString("base64");
+        const pageResult = await ocrSingleImage(pageBase64, "image/png", apiUrl, apiKey, controller.signal);
+        combinedMarkdown += (i > 0 ? "\n\n" : "") + pageResult.markdown;
+        allImages.push(...pageResult.images);
+      }
+
+      return { markdown: combinedMarkdown, images: allImages };
     }
 
-    return { markdown: content, images: [] };
+    // Images: send directly
+    const base64Content = fileBuffer.toString("base64");
+    return await ocrSingleImage(base64Content, mimeType, apiUrl, apiKey, controller.signal);
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new Error("OCR timed out after 120 seconds");
