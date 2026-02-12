@@ -11,6 +11,8 @@ interface ResultViewProps {
   result: {
     id: string;
     outputContent: string;
+    markdownContent: string;
+    extractedImages: string[];
     readingMinutes: number;
     complexityLevel: string;
     outputLanguage: string;
@@ -23,6 +25,7 @@ export default function ResultView({ result }: ResultViewProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [showReprocess, setShowReprocess] = useState(false);
+  const [showExtraction, setShowExtraction] = useState(false);
   const [newMinutes, setNewMinutes] = useState(result.readingMinutes);
   const [newComplexity, setNewComplexity] = useState(result.complexityLevel);
   const [newLanguage, setNewLanguage] = useState(result.outputLanguage);
@@ -243,6 +246,59 @@ export default function ResultView({ result }: ResultViewProps) {
               </span>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Extraction Details (collapsible) */}
+      {result.markdownContent && (
+        <div className="mb-6 no-print">
+          <button
+            onClick={() => setShowExtraction(!showExtraction)}
+            className="flex items-center gap-2 text-xs font-medium text-gray-400 uppercase tracking-wide hover:text-gray-600 transition-colors cursor-pointer"
+          >
+            <svg
+              className={`w-3.5 h-3.5 transition-transform ${showExtraction ? "rotate-90" : ""}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              aria-hidden="true"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            Extraction Details
+          </button>
+          {showExtraction && (
+            <div className="mt-3 bg-gray-50 border border-gray-200 rounded-xl p-5 animate-slide-down space-y-4">
+              {result.extractedImages.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                    Extracted Images ({result.extractedImages.length})
+                  </h4>
+                  <div className="flex flex-wrap gap-3">
+                    {result.extractedImages.map((img, i) => (
+                      <a key={i} href={img} target="_blank" rel="noopener noreferrer">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={img}
+                          alt={`Extracted image ${i + 1}`}
+                          className="h-20 w-auto rounded-lg border border-gray-200 hover:border-brand-300 transition-colors"
+                          loading="lazy"
+                        />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div>
+                <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                  Raw Extracted Markdown
+                </h4>
+                <pre className="bg-white border border-gray-200 rounded-lg p-4 text-xs text-gray-700 font-mono overflow-x-auto max-h-96 overflow-y-auto whitespace-pre-wrap break-words">
+                  {result.markdownContent}
+                </pre>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
