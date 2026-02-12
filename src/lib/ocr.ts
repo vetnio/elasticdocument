@@ -1,11 +1,12 @@
 import * as mupdf from "mupdf";
+import { extractAndUploadImages } from "@/lib/image-extract";
 
 export interface OcrResult {
   markdown: string;
   images: string[];
 }
 
-const OCR_TIMEOUT_MS = 120_000;
+const OCR_TIMEOUT_MS = 180_000;
 const MAX_PDF_PAGES = 50;
 
 const DOTS_OCR_PROMPT = `Please output the layout information from the PDF image, including each layout element's bbox, its category, and the corresponding text content within the bbox.
@@ -32,9 +33,9 @@ interface LayoutElement {
   text?: string;
 }
 
-function layoutToMarkdown(elements: LayoutElement[]): { markdown: string; images: string[] } {
+function layoutToMarkdown(elements: LayoutElement[]): { markdown: string; pictureBboxes: number[][] } {
   const parts: string[] = [];
-  const images: string[] = [];
+  const pictureBboxes: number[][] = [];
 
   for (const el of elements) {
     switch (el.category) {
@@ -63,10 +64,12 @@ function layoutToMarkdown(elements: LayoutElement[]): { markdown: string; images
       case "Footnote":
         parts.push(`> ${el.text ?? ""}`);
         break;
-      case "Picture":
-        // No text content for pictures, but track them
-        images.push(`picture_bbox_${el.bbox.join("_")}`);
+      case "Picture": {
+        const idx = pictureBboxes.length;
+        pictureBboxes.push(el.bbox);
+        parts.push(`__IMAGE_PLACEHOLDER_${idx}__`);
         break;
+      }
       case "Page-header":
       case "Page-footer":
         // Skip headers/footers for cleaner output
@@ -76,7 +79,7 @@ function layoutToMarkdown(elements: LayoutElement[]): { markdown: string; images
     }
   }
 
-  return { markdown: parts.join("\n\n"), images };
+  return { markdown: parts.join("\n\n"), pictureBboxes };
 }
 
 function detectMimeType(contentType: string | null, url: string): string {
@@ -122,6 +125,9 @@ async function ocrSingleImage(
   apiUrl: string,
   apiKey: string,
   signal: AbortSignal,
+  imageBuffer: Buffer,
+  userId: string,
+  pageIndex: number,
 ): Promise<OcrResult> {
   const dataUri = `data:${mimeType};base64,${base64Content}`;
 
@@ -162,7 +168,32 @@ async function ocrSingleImage(
     const parsed = JSON.parse(jsonStr);
     const elements: LayoutElement[] = parsed.layout_elements ?? parsed;
     if (Array.isArray(elements)) {
-      return layoutToMarkdown(elements);
+      const { markdown, pictureBboxes } = layoutToMarkdown(elements);
+
+      // Extract and upload images from detected picture regions
+      const extracted = await extractAndUploadImages(imageBuffer, pictureBboxes, userId, pageIndex);
+
+      // Build a map from placeholder index to URL
+      const urlByIndex = new Map<number, string>();
+      for (const img of extracted) {
+        const idx = pictureBboxes.indexOf(img.bbox);
+        if (idx !== -1) urlByIndex.set(idx, img.url);
+      }
+
+      // Replace placeholders with real image markdown or remove them
+      let finalMarkdown = markdown;
+      for (let i = 0; i < pictureBboxes.length; i++) {
+        const placeholder = `__IMAGE_PLACEHOLDER_${i}__`;
+        const url = urlByIndex.get(i);
+        if (url) {
+          finalMarkdown = finalMarkdown.replace(placeholder, `![Document image](${url})`);
+        } else {
+          finalMarkdown = finalMarkdown.replace(placeholder, "");
+        }
+      }
+
+      const images = extracted.map((e) => e.url);
+      return { markdown: finalMarkdown, images };
     }
   } catch {
     // JSON parsing failed — use raw content as markdown
@@ -171,7 +202,7 @@ async function ocrSingleImage(
   return { markdown: content, images: [] };
 }
 
-export async function runOcr(fileUrl: string): Promise<OcrResult> {
+export async function runOcr(fileUrl: string, userId: string): Promise<OcrResult> {
   const endpoint = process.env.HUGGINGFACE_OCR_ENDPOINT;
   const apiKey = process.env.HUGGINGFACE_API_KEY;
 
@@ -207,7 +238,10 @@ export async function runOcr(fileUrl: string): Promise<OcrResult> {
       for (let i = 0; i < pageImages.length; i++) {
         if (controller.signal.aborted) break;
         const pageBase64 = pageImages[i].toString("base64");
-        const pageResult = await ocrSingleImage(pageBase64, "image/png", apiUrl, apiKey, controller.signal);
+        const pageResult = await ocrSingleImage(
+          pageBase64, "image/png", apiUrl, apiKey, controller.signal,
+          pageImages[i], userId, i,
+        );
         combinedMarkdown += (i > 0 ? "\n\n" : "") + pageResult.markdown;
         allImages.push(...pageResult.images);
       }
@@ -217,10 +251,13 @@ export async function runOcr(fileUrl: string): Promise<OcrResult> {
 
     // Images: send directly
     const base64Content = fileBuffer.toString("base64");
-    return await ocrSingleImage(base64Content, mimeType, apiUrl, apiKey, controller.signal);
+    return await ocrSingleImage(
+      base64Content, mimeType, apiUrl, apiKey, controller.signal,
+      fileBuffer, userId, 0,
+    );
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
-      throw new Error("OCR timed out after 120 seconds");
+      throw new Error("OCR timed out after 180 seconds");
     }
     throw err;
   } finally {

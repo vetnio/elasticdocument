@@ -8,6 +8,8 @@ import { runOcr } from "@/lib/ocr";
 import { scrapeUrl } from "@/lib/url-scraper";
 import { streamSummary } from "@/lib/summarize";
 
+export const maxDuration = 600;
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -166,7 +168,7 @@ export async function GET(
             if (abortSignal.aborted) return;
             if (!doc.blobUrl) continue;
             try {
-              const ocrResult = await runOcr(doc.blobUrl);
+              const ocrResult = await runOcr(doc.blobUrl, session.user.id);
               combinedMarkdown += `\n\n--- ${doc.fileName} ---\n\n${ocrResult.markdown}`;
               allImages.push(...ocrResult.images);
             } catch (err) {
