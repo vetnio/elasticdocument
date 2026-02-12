@@ -16,7 +16,7 @@ const DOTS_OCR_PROMPT = `Please output the layout information from the PDF image
 2. Layout Categories: ['Caption', 'Footnote', 'Formula', 'List-item', 'Page-footer', 'Page-header', 'Picture', 'Section-header', 'Table', 'Text', 'Title'].
 
 3. Text Extraction & Formatting Rules:
-    - Picture: Omit text field
+    - Picture: Omit text field, but you MUST still include the element with its bbox. Every image, figure, diagram, chart, photo, illustration, or graphic MUST be detected as a Picture element.
     - Formula: Format as LaTeX
     - Table: Format as HTML
     - Others: Format as Markdown
@@ -24,6 +24,7 @@ const DOTS_OCR_PROMPT = `Please output the layout information from the PDF image
 4. Constraints:
     - Output original text with no translation
     - Sort all layout elements by reading order
+    - Do NOT skip any visual elements. All pictures/figures/diagrams must appear in the output as Picture category with accurate bounding boxes.
 
 5. Final Output: Single JSON object`;
 
