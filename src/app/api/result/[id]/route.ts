@@ -251,9 +251,10 @@ export async function GET(
               formattedContent += chunk;
               push({ type: "formatted_chunk", text: chunk });
             }
-          } catch {
-            // Formatted stream failed — will be handled below
+          } catch (err) {
+            push({ type: "error", message: `Summarization failed: ${err instanceof Error ? err.message : "Unknown error"}` });
           }
+          push({ type: "formatted_done" });
           q.fmtDone = true;
           q.notify?.();
         })();
@@ -266,8 +267,9 @@ export async function GET(
               push({ type: "breadtext_chunk", text: chunk });
             }
           } catch {
-            // Breadtext stream failed — not critical
+            // Breadtext failure is non-critical; formatted is the primary output
           }
+          push({ type: "breadtext_done" });
           q.btDone = true;
           q.notify?.();
         })();
@@ -292,6 +294,18 @@ export async function GET(
 
         formattedContent = formattedContent.trim();
         breadtext = breadtext.trim();
+
+        // If summarization produced no output (API failure), don't cache the empty
+        // result — leave markdownContent intact so retry skips OCR and just re-runs
+        // summarization.
+        if (!formattedContent) {
+          send({ type: "error", message: "Failed to generate summary. Please try again." });
+          send({ type: "done" });
+          clearInterval(heartbeat);
+          abortSignal.removeEventListener("abort", onAbort);
+          controller.close();
+          return;
+        }
 
         // If Claude returned the "empty document" canned response, don't cache it
         const isEmptyResponse = formattedContent.includes("appears to be empty or could not be read");

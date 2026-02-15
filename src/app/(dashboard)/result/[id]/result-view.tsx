@@ -42,6 +42,8 @@ export default function ResultView({ result }: ResultViewProps) {
   const [formattedContent, setFormattedContent] = useState(result.outputContent);
   const [breadtextContent, setBreadtextContent] = useState(result.outputBreadtext);
   const [errors, setErrors] = useState<string[]>([]);
+  const [formattedDone, setFormattedDone] = useState(!result.needsProcessing);
+  const [breadtextDone, setBreadtextDone] = useState(!result.needsProcessing);
   const [connectionKey, setConnectionKey] = useState(0);
   const eventSourceRef = useRef<EventSource | null>(null);
   const activeTabRef = useRef(activeTab);
@@ -112,6 +114,14 @@ export default function ResultView({ result }: ResultViewProps) {
 
           case "breadtext":
             setBreadtextContent(data.text);
+            break;
+
+          case "formatted_done":
+            setFormattedDone(true);
+            break;
+
+          case "breadtext_done":
+            setBreadtextDone(true);
             break;
 
           case "error":
@@ -231,6 +241,8 @@ export default function ResultView({ result }: ResultViewProps) {
     setErrors([]);
     setFormattedContent("");
     setBreadtextContent("");
+    setFormattedDone(false);
+    setBreadtextDone(false);
     setConnectionKey((k) => k + 1);
   }
 
@@ -258,7 +270,7 @@ export default function ResultView({ result }: ResultViewProps) {
       <div className="flex items-start justify-between mb-6 gap-4">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Result</h2>
-          {!isStreaming && formattedContent && (
+          {formattedContent && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
               <span className="text-sm text-gray-500">
                 {formatRelativeDate(result.createdAt)}
@@ -273,11 +285,11 @@ export default function ResultView({ result }: ResultViewProps) {
               <span className="text-sm text-gray-500">{result.outputLanguage}</span>
             </div>
           )}
-          {isStreaming && (
+          {isStreaming && !formattedContent && (
             <p className="text-sm text-gray-500 mt-1.5">{streamingStatus}</p>
           )}
         </div>
-        {!isStreaming && formattedContent && (
+        {formattedContent && (
           <div className="flex gap-2 shrink-0 no-print">
             <button
               onClick={handleCopy}
@@ -309,12 +321,14 @@ export default function ResultView({ result }: ResultViewProps) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
               </svg>
             </button>
-            <button
-              onClick={() => setShowReprocess(!showReprocess)}
-              className="px-3.5 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 text-sm font-medium transition-colors shadow-sm cursor-pointer"
-            >
-              Reprocess
-            </button>
+            {!isStreaming && (
+              <button
+                onClick={() => setShowReprocess(!showReprocess)}
+                className="px-3.5 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 text-sm font-medium transition-colors shadow-sm cursor-pointer"
+              >
+                Reprocess
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -468,12 +482,12 @@ export default function ResultView({ result }: ResultViewProps) {
               <p className="text-sm text-red-700">{err}</p>
             </div>
           ))}
-          {!isStreaming && errors.includes("Connection lost.") && (
+          {!isStreaming && errors.length > 0 && (
             <button
               onClick={handleRetry}
               className="px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 text-sm font-medium transition-colors shadow-sm cursor-pointer"
             >
-              Retry Connection
+              Retry
             </button>
           )}
         </div>
@@ -492,24 +506,8 @@ export default function ResultView({ result }: ResultViewProps) {
         </button>
       )}
 
-      {/* Pre-summarization loading */}
-      {isStreaming && !formattedContent && !breadtextContent && (
-        <div className="bg-white border border-gray-200 rounded-xl p-12 flex flex-col items-center justify-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-brand-50 flex items-center justify-center">
-            <svg className="w-6 h-6 text-brand-600 animate-spin" viewBox="0 0 24 24" aria-hidden="true">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-            </svg>
-          </div>
-          <div className="text-center">
-            <p className="text-sm font-medium text-gray-700">{streamingStatus}</p>
-            <p className="text-xs text-gray-400 mt-1">This may take a minute depending on document size</p>
-          </div>
-        </div>
-      )}
-
       {/* Tabs + Content */}
-      {(formattedContent || breadtextContent) && (
+      {(formattedContent || breadtextContent || isStreaming) && (
         <div>
           {showTabs && (
             <div className="flex gap-1 mb-4 no-print">
@@ -522,7 +520,7 @@ export default function ResultView({ result }: ResultViewProps) {
                 }`}
               >
                 Formatted
-                {isStreaming && spinnerSvg}
+                {isStreaming && !formattedDone && spinnerSvg}
               </button>
               <button
                 onClick={() => setActiveTab("breadtext")}
@@ -533,7 +531,7 @@ export default function ResultView({ result }: ResultViewProps) {
                 }`}
               >
                 Breadtext
-                {isStreaming && spinnerSvg}
+                {isStreaming && !breadtextDone && spinnerSvg}
               </button>
             </div>
           )}
@@ -543,11 +541,11 @@ export default function ResultView({ result }: ResultViewProps) {
               {formattedContent ? (
                 <>
                   <MarkdownRenderer content={formattedContent} />
-                  {isStreaming && (
+                  {isStreaming && !formattedDone && (
                     <span className="inline-block w-2 h-5 bg-brand-500 animate-pulse rounded-sm ml-0.5" />
                   )}
                 </>
-              ) : isStreaming ? (
+              ) : isStreaming && !formattedDone ? (
                 <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
                   {spinnerSvg}
                   <span>Generating...</span>
@@ -559,11 +557,11 @@ export default function ResultView({ result }: ResultViewProps) {
               {breadtextContent ? (
                 <div className="prose prose-gray max-w-none text-base leading-relaxed whitespace-pre-line">
                   {breadtextContent}
-                  {isStreaming && (
+                  {isStreaming && !breadtextDone && (
                     <span className="inline-block w-2 h-5 bg-brand-500 animate-pulse rounded-sm ml-0.5" />
                   )}
                 </div>
-              ) : isStreaming ? (
+              ) : isStreaming && !breadtextDone ? (
                 <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
                   {spinnerSvg}
                   <span>Generating...</span>
@@ -571,6 +569,27 @@ export default function ResultView({ result }: ResultViewProps) {
               ) : null}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Blank state fallback: streaming finished but nothing rendered */}
+      {!isStreaming && !formattedContent && !breadtextContent && errors.length === 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl p-12 flex flex-col items-center justify-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-red-50 flex items-center justify-center">
+            <svg className="w-6 h-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-medium text-gray-700">No content was generated</p>
+            <p className="text-xs text-gray-400 mt-1">Something went wrong during processing</p>
+          </div>
+          <button
+            onClick={handleRetry}
+            className="px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 text-sm font-medium transition-colors shadow-sm cursor-pointer"
+          >
+            Retry
+          </button>
         </div>
       )}
 
