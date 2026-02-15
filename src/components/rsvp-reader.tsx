@@ -102,8 +102,10 @@ export default function RsvpReader({ content, onClose, isStreaming = false }: Rs
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [wpm, setWpm] = useState(300);
-  const [imageTimeRemaining, setImageTimeRemaining] = useState(10000);
+  const IMAGE_DURATION = 10000;
+  const [imageTimeRemaining, setImageTimeRemaining] = useState(IMAGE_DURATION);
   const [imageLoaded, setImageLoaded] = useState(false);
+  const [imagePaused, setImagePaused] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [wpmFlash, setWpmFlash] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -123,7 +125,7 @@ export default function RsvpReader({ content, onClose, isStreaming = false }: Rs
     for (let i = currentIndex; i < tokens.length; i++) {
       const t = tokens[i];
       if (t.type === "word") ms += getWordDelay(t.text, wpm);
-      else ms += 10000;
+      else ms += IMAGE_DURATION;
     }
     return ms;
   }, [currentIndex, wpm, tokens]);
@@ -219,11 +221,12 @@ export default function RsvpReader({ content, onClose, isStreaming = false }: Rs
   useEffect(() => {
     if (!currentToken || currentToken.type !== "image") {
       setImageLoaded(false);
-      setImageTimeRemaining(10000);
+      setImageTimeRemaining(IMAGE_DURATION);
+      setImagePaused(false);
       clearImageTimer();
       return;
     }
-    if (!isPlaying || !imageLoaded) {
+    if (!isPlaying || !imageLoaded || imagePaused) {
       clearImageTimer();
       return;
     }
@@ -236,7 +239,7 @@ export default function RsvpReader({ content, onClose, isStreaming = false }: Rs
       const remaining = startRemaining - elapsed;
       if (remaining <= 0) {
         clearImageTimer();
-        setImageTimeRemaining(10000);
+        setImageTimeRemaining(IMAGE_DURATION);
         setImageLoaded(false);
         if (currentIndex < tokens.length - 1) {
           setCurrentIndex((i) => i + 1);
@@ -249,7 +252,7 @@ export default function RsvpReader({ content, onClose, isStreaming = false }: Rs
     }, 50);
 
     return clearImageTimer;
-  }, [isPlaying, currentToken, imageLoaded, currentIndex, tokens.length, clearImageTimer, imageTimeRemaining, isStreaming]);
+  }, [isPlaying, currentToken, imageLoaded, currentIndex, tokens.length, clearImageTimer, imageTimeRemaining, isStreaming, imagePaused, IMAGE_DURATION]);
 
   // --- Sentence navigation ---
   const skipToPrevSentence = useCallback(() => {
@@ -261,7 +264,7 @@ export default function RsvpReader({ content, onClose, isStreaming = false }: Rs
       while (i > 0 && tokens[i - 1].sentenceIndex === prevSentence) i--;
     }
     setCurrentIndex(i);
-    setImageTimeRemaining(10000);
+    setImageTimeRemaining(IMAGE_DURATION);
     setImageLoaded(false);
   }, [currentIndex, tokens]);
 
@@ -271,7 +274,7 @@ export default function RsvpReader({ content, onClose, isStreaming = false }: Rs
     while (i < tokens.length - 1 && tokens[i].sentenceIndex === currentSentence) i++;
     if (i < tokens.length) {
       setCurrentIndex(i);
-      setImageTimeRemaining(10000);
+      setImageTimeRemaining(IMAGE_DURATION);
       setImageLoaded(false);
     }
   }, [currentIndex, tokens]);
@@ -285,7 +288,7 @@ export default function RsvpReader({ content, onClose, isStreaming = false }: Rs
       const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
       const newIndex = Math.round(ratio * (tokens.length - 1));
       setCurrentIndex(newIndex);
-      setImageTimeRemaining(10000);
+      setImageTimeRemaining(IMAGE_DURATION);
       setImageLoaded(false);
     },
     [tokens.length]
@@ -389,7 +392,7 @@ export default function RsvpReader({ content, onClose, isStreaming = false }: Rs
         {countdown !== null ? (
           <span className="text-8xl sm:text-9xl font-bold text-brand-600 animate-pulse">{countdown}</span>
         ) : currentToken?.type === "image" ? (
-          <div className="flex flex-col items-center gap-4">
+          <div className="flex flex-col items-center gap-5">
             <div className="relative">
               {!imageLoaded && (
                 <div className="w-64 h-48 bg-gray-100 rounded-lg animate-pulse" />
@@ -398,17 +401,28 @@ export default function RsvpReader({ content, onClose, isStreaming = false }: Rs
               <img
                 src={currentToken.url}
                 alt="Content image"
-                className={`max-h-[70vh] object-contain rounded-lg ${imageLoaded ? "" : "absolute opacity-0"}`}
+                className={`max-h-[60vh] object-contain rounded-lg ${imageLoaded ? "" : "absolute opacity-0"}`}
                 onLoad={() => setImageLoaded(true)}
               />
             </div>
             {imageLoaded && (
-              <div className="w-64 h-2 bg-gray-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-brand-600 transition-all duration-75"
-                  style={{ width: `${((10000 - imageTimeRemaining) / 10000) * 100}%` }}
-                />
-              </div>
+              <ImageControls
+                timeRemaining={imageTimeRemaining}
+                duration={IMAGE_DURATION}
+                paused={imagePaused || !isPlaying}
+                onSkip={() => {
+                  clearImageTimer();
+                  setImageTimeRemaining(IMAGE_DURATION);
+                  setImageLoaded(false);
+                  setImagePaused(false);
+                  if (currentIndex < tokens.length - 1) {
+                    setCurrentIndex((i) => i + 1);
+                  } else if (!isStreaming) {
+                    setIsPlaying(false);
+                  }
+                }}
+                onTogglePause={() => setImagePaused((p) => !p)}
+              />
             )}
           </div>
         ) : currentToken?.type === "word" ? (
@@ -469,7 +483,7 @@ export default function RsvpReader({ content, onClose, isStreaming = false }: Rs
           <button
             onClick={() => {
               setCurrentIndex(0);
-              setImageTimeRemaining(10000);
+              setImageTimeRemaining(IMAGE_DURATION);
               setImageLoaded(false);
               setIsPlaying(false);
               hasStartedRef.current = false;
@@ -548,6 +562,97 @@ export default function RsvpReader({ content, onClose, isStreaming = false }: Rs
       </div>
     </div>,
     document.body
+  );
+}
+
+// --- Image countdown controls ---
+
+function ImageControls({
+  timeRemaining,
+  duration,
+  paused,
+  onSkip,
+  onTogglePause,
+}: {
+  timeRemaining: number;
+  duration: number;
+  paused: boolean;
+  onSkip: () => void;
+  onTogglePause: () => void;
+}) {
+  const radius = 11;
+  const circumference = 2 * Math.PI * radius;
+  const progress = timeRemaining / duration;
+  const offset = circumference * (1 - progress);
+  const seconds = Math.ceil(timeRemaining / 1000);
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={onSkip}
+        className="inline-flex items-center gap-2.5 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-full text-sm font-medium text-gray-700 transition-colors cursor-pointer"
+        aria-label={`Skip image (${seconds}s remaining)`}
+      >
+        <svg width="26" height="26" viewBox="0 0 26 26" className="shrink-0" aria-hidden="true">
+          {/* Background track */}
+          <circle
+            cx="13"
+            cy="13"
+            r={radius}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            className="text-gray-300"
+          />
+          {/* Countdown arc */}
+          <circle
+            cx="13"
+            cy="13"
+            r={radius}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            className="text-brand-600"
+            style={{
+              strokeDasharray: circumference,
+              strokeDashoffset: offset,
+              transform: "rotate(-90deg)",
+              transformOrigin: "center",
+              transition: paused ? "none" : "stroke-dashoffset 100ms linear",
+            }}
+          />
+          {/* Seconds number */}
+          <text
+            x="13"
+            y="13"
+            textAnchor="middle"
+            dominantBaseline="central"
+            className="fill-gray-700"
+            style={{ fontSize: "10px", fontWeight: 600 }}
+          >
+            {seconds}
+          </text>
+        </svg>
+        Skip
+      </button>
+      <button
+        onClick={onTogglePause}
+        className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors cursor-pointer"
+        aria-label={paused ? "Resume countdown" : "Pause countdown"}
+        title={paused ? "Resume" : "Pause"}
+      >
+        {paused ? (
+          <svg className="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+        ) : (
+          <svg className="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+          </svg>
+        )}
+      </button>
+    </div>
   );
 }
 

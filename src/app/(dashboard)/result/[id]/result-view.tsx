@@ -555,12 +555,12 @@ export default function ResultView({ result }: ResultViewProps) {
           ) : (
             <div className="bg-white border border-gray-200 rounded-xl p-6 sm:p-8 shadow-sm print-content">
               {breadtextContent ? (
-                <div className="prose prose-gray max-w-none text-base leading-relaxed whitespace-pre-line">
-                  {breadtextContent}
+                <>
+                  <MarkdownRenderer content={breadtextContent} />
                   {isStreaming && !breadtextDone && (
                     <span className="inline-block w-2 h-5 bg-brand-500 animate-pulse rounded-sm ml-0.5" />
                   )}
-                </div>
+                </>
               ) : isStreaming && !breadtextDone ? (
                 <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
                   {spinnerSvg}
