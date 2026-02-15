@@ -136,8 +136,9 @@ export async function GET(
 
         // Skip OCR if markdown already exists (e.g., reprocessing)
         if (!combinedMarkdown) {
-          // Step 1: Scrape URLs
+          // Step 1: Scrape URLs (extract text directly, no OCR needed)
           const urlDocs = documents.filter((d) => d.isUrl);
+          const scrapedMarkdowns = new Map<string, string>();
           if (urlDocs.length > 0) {
             send({ type: "status", message: "Fetching web pages..." });
             for (const doc of urlDocs) {
@@ -150,6 +151,7 @@ export async function GET(
                     .set({ blobUrl: scraped.blobUrl, fileName: scraped.fileName })
                     .where(eq(document.id, doc.id));
                   doc.blobUrl = scraped.blobUrl;
+                  scrapedMarkdowns.set(doc.id, scraped.markdown);
                 } catch (err) {
                   send({ type: "error", message: `Failed to fetch ${doc.sourceUrl}: ${err instanceof Error ? err.message : "Unknown error"}` });
                 }
@@ -159,13 +161,24 @@ export async function GET(
 
           if (abortSignal.aborted) return;
 
-          // Step 2: OCR all documents
+          // Step 2: Extract content from all documents
           send({ type: "status", message: "Extracting text and images..." });
           combinedMarkdown = "";
           allImages = [];
 
           for (const doc of documents) {
             if (abortSignal.aborted) return;
+
+            // URL documents: use already-scraped markdown (no OCR)
+            if (doc.isUrl) {
+              const md = scrapedMarkdowns.get(doc.id);
+              if (md) {
+                combinedMarkdown += `\n\n--- ${doc.fileName} ---\n\n${md}`;
+              }
+              continue;
+            }
+
+            // File documents: run OCR
             if (!doc.blobUrl) continue;
             try {
               const ocrResult = await runOcr(doc.blobUrl, session.user.id);

@@ -81,7 +81,9 @@ export async function POST(request: NextRequest) {
 
   // Create all records in a transaction to prevent orphaned records and race conditions
   let limitExceeded = false;
-  const result = await db.transaction(async (tx) => {
+  let result;
+  try {
+  result = await db.transaction(async (tx) => {
     // Check usage limits inside transaction to prevent race conditions
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -161,6 +163,10 @@ export async function POST(request: NextRequest) {
 
     return result;
   });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to create processing job";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 
   if (limitExceeded || !result) {
     return NextResponse.json(

@@ -131,8 +131,9 @@ export default function DashboardPage() {
         });
 
         if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || `Failed to upload ${file.name}`);
+          let msg = `Failed to upload ${file.name}`;
+          try { const data = await res.json(); msg = data.error || msg; } catch {}
+          throw new Error(msg);
         }
 
         const data = await res.json();
@@ -160,8 +161,9 @@ export default function DashboardPage() {
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to start processing");
+        let msg = "Failed to start processing";
+        try { const data = await res.json(); msg = data.error || msg; } catch {}
+        throw new Error(msg);
       }
 
       const data = await res.json();

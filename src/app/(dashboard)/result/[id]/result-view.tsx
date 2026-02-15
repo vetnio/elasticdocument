@@ -68,8 +68,9 @@ export default function ResultView({ result }: ResultViewProps) {
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        toast(data.error || "Failed to reprocess", "error");
+        let msg = "Failed to reprocess";
+        try { const data = await res.json(); msg = data.error || msg; } catch {}
+        toast(msg, "error");
         setReprocessing(false);
         return;
       }
