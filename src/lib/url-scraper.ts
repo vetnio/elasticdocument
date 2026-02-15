@@ -57,6 +57,8 @@ async function fetchViaJinaReader(url: string): Promise<string> {
     const response = await fetch(`https://r.jina.ai/${url}`, {
       headers: {
         Accept: "text/markdown",
+        "X-Return-Format": "markdown",
+        "X-No-Cache": "true",
       },
       signal: controller.signal,
     });

@@ -122,16 +122,12 @@ export default function ProcessPage({ params }: { params: Promise<{ id: string }
   ];
 
   const currentStepIndex = steps.findIndex((s) => s.key === status);
-  const wordCount = content ? content.split(/\s+/).filter(Boolean).length : 0;
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Processing</h2>
-          {wordCount > 0 && (
-            <p className="text-sm text-gray-400 mt-0.5">{wordCount.toLocaleString()} words generated</p>
-          )}
+          <h2 className="text-xl font-semibold text-gray-900">Summarizing</h2>
         </div>
         {status === "done" && content && (
           <button

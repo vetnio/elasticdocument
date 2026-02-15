@@ -192,9 +192,15 @@ export async function GET(
           // Strip document separator lines to check if there's real content
           const contentOnly = combinedMarkdown.replace(/---\s*.+?\s*---/g, "").trim();
           if (!contentOnly) {
+            // Reset sentinel so the result can be retried
+            await db
+              .update(processedResult)
+              .set({ markdownContent: "" })
+              .where(eq(processedResult.id, result.id));
             send({ type: "error", message: "No content could be extracted from the documents. The file may be empty or unreadable." });
             send({ type: "done" });
             clearInterval(heartbeat);
+            abortSignal.removeEventListener("abort", onAbort);
             controller.close();
             return;
           }
@@ -265,6 +271,22 @@ export async function GET(
           // Fallback: no delimiter found, use full output for both
           formattedContent = fullOutput.trim();
           breadtext = "";
+        }
+
+        // If Claude returned the "empty document" canned response, don't cache it
+        // so the result can be retried after fixing the underlying issue.
+        const isEmptyResponse = formattedContent.includes("appears to be empty or could not be read");
+        if (isEmptyResponse) {
+          await db
+            .update(processedResult)
+            .set({ markdownContent: "" })
+            .where(eq(processedResult.id, result.id));
+          send({ type: "error", message: formattedContent });
+          send({ type: "done" });
+          clearInterval(heartbeat);
+          abortSignal.removeEventListener("abort", onAbort);
+          controller.close();
+          return;
         }
 
         // Find which images were referenced in the formatted output
