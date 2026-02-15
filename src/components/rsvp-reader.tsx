@@ -16,7 +16,7 @@ function parseMarkdownToTokens(markdown: string): RsvpToken[] {
   let text = markdown.replace(/!\[[^\]]*\]\(([^)]+)\)/g, (_, url) => {
     const idx = images.length;
     images.push(url);
-    return ` __IMG_${idx}__ `;
+    return ` %%RSVPIMG${idx}%% `;
   });
 
   text = text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
@@ -37,7 +37,7 @@ function parseMarkdownToTokens(markdown: string): RsvpToken[] {
   let sentenceIndex = 0;
 
   for (const word of words) {
-    const imgMatch = word.match(/^__IMG_(\d+)__$/);
+    const imgMatch = word.match(/^%%RSVPIMG(\d+)%%$/);
     if (imgMatch) {
       tokens.push({ type: "image", url: images[parseInt(imgMatch[1])], sentenceIndex });
     } else {
