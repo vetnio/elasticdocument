@@ -55,7 +55,9 @@ export function buildFormattedPrompt(params: SummarizeParams): string {
 
   const imageInstructions =
     params.images.length > 0
-      ? `\n\nThe following images were extracted from the source documents. Include relevant images using markdown image syntax (![description](url)) where they add value to understanding the content:\n${params.images.map((img, i) => `- Image ${i + 1}: ${img}`).join("\n")}`
+      ? `\n\nIMAGE INSTRUCTIONS:
+The source content contains embedded images as markdown image syntax (![description](url)). You MUST preserve ALL image references from the source content in your output. Reproduce them using the exact same markdown syntax and URL — do not modify, omit, or re-describe them. Place each image near the section of your summary that corresponds to where it appeared in the source.
+Additionally, the following image URLs were extracted and are available:\n${params.images.map((img, i) => `- Image ${i + 1}: ${img}`).join("\n")}\nIf any of these images are not already embedded in the source markdown, include them where relevant using ![](url) syntax.`
       : "";
 
   return `You are an expert document summarizer and restructurer. Your job is to take the following document content and produce a well-formatted summary for reading on screen.
@@ -79,6 +81,11 @@ ${params.markdown}`;
 export function buildBreadtextPrompt(params: SummarizeParams): string {
   const shared = buildSharedConstraints(params);
 
+  const imageInstructions =
+    params.images.length > 0
+      ? `\nAdditionally, the following image URLs were extracted and are available:\n${params.images.map((img, i) => `- Image ${i + 1}: ${img}`).join("\n")}\nIf any of these images are not already embedded in the source markdown, include them between paragraphs using ![](url) syntax.`
+      : "";
+
   return `You are an expert document summarizer. Your job is to take the following document content and produce a continuous prose summary optimized for speed reading (one word at a time on screen).
 
 ${shared}
@@ -88,7 +95,7 @@ FORMAT INSTRUCTIONS:
 - Use only plain sentences organized into paragraphs separated by blank lines.
 - Use clear topic transitions between paragraphs so the reader can follow the logical flow without visual formatting cues.
 - Optimize for one-word-at-a-time reading: prefer shorter sentences, avoid parenthetical asides, and keep clause structures simple.
-- Do NOT include any images.
+- If the source content contains embedded images (![description](url)), preserve ALL of them in your output. Place each image on its own line between paragraphs, using the exact same markdown syntax and URL from the source. Do not omit images.${imageInstructions}
 
 SOURCE CONTENT:
 

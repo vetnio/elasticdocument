@@ -327,8 +327,8 @@ export async function GET(
           breadtext = "";
         }
 
-        // Find which images were referenced in the formatted output
-        const usedImages = allImages.filter((img) => formattedContent.includes(img));
+        // Find which images were referenced in either output
+        const usedImages = allImages.filter((img) => formattedContent.includes(img) || breadtext.includes(img));
 
         // Save both versions
         await db
