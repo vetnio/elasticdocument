@@ -164,13 +164,13 @@ export async function POST(request: NextRequest) {
     return result;
   });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to create processing job";
+    const msg = err instanceof Error ? err.message : "Failed to create summarization job";
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
   if (limitExceeded || !result) {
     return NextResponse.json(
-      { error: `Daily limit of ${USAGE_LIMIT_PER_DAY} processed documents reached. Try again tomorrow.` },
+      { error: `Daily limit of ${USAGE_LIMIT_PER_DAY} summarized documents reached. Try again tomorrow.` },
       { status: 429 }
     );
   }

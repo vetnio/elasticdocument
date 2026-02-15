@@ -90,7 +90,7 @@ export async function GET(
     const stream = new ReadableStream({
       start(controller) {
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ type: "status", message: "Already processing in another request. Please wait..." })}\n\n`)
+          encoder.encode(`data: ${JSON.stringify({ type: "status", message: "Already summarizing in another request. Please wait..." })}\n\n`)
         );
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`)
@@ -356,7 +356,7 @@ export async function GET(
             )
           );
         if (abortSignal.aborted) return;
-        const errorMessage = err instanceof Error ? err.message : "Processing failed";
+        const errorMessage = err instanceof Error ? err.message : "Summarization failed";
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({ type: "error", message: errorMessage })}\n\n`)
         );

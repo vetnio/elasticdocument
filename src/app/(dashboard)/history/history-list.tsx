@@ -127,13 +127,13 @@ export default function HistoryList({ results: initialResults }: { results: Hist
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          <p className="text-gray-500 text-sm mb-1">No processed documents yet</p>
-          <p className="text-gray-400 text-xs mb-4">Your processed documents will appear here</p>
+          <p className="text-gray-500 text-sm mb-1">No summarized documents yet</p>
+          <p className="text-gray-400 text-xs mb-4">Your summarized documents will appear here</p>
           <button
             onClick={() => router.push("/dashboard")}
             className="px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 text-sm font-medium transition-colors shadow-sm cursor-pointer"
           >
-            Process your first document
+            Summarize your first document
           </button>
         </div>
       </div>
@@ -288,7 +288,7 @@ export default function HistoryList({ results: initialResults }: { results: Hist
                     </span>
                   ) : (
                     <span className="text-xs font-medium text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">
-                      Processing
+                      Summarizing
                     </span>
                   )}
                   <button
@@ -321,7 +321,7 @@ export default function HistoryList({ results: initialResults }: { results: Hist
       <ConfirmDialog
         open={!!confirmDelete}
         title="Delete result"
-        message="This will permanently delete this processed document and its output. This action cannot be undone."
+        message="This will permanently delete this summarized document and its output. This action cannot be undone."
         confirmLabel="Delete"
         destructive
         onConfirm={() => confirmDelete && handleDelete(confirmDelete)}

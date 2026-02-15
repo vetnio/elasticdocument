@@ -193,7 +193,7 @@ export default function ResultView({ result }: ResultViewProps) {
       });
 
       if (!res.ok) {
-        let msg = "Failed to reprocess";
+        let msg = "Failed to resummarize";
         try { const data = await res.json(); msg = data.error || msg; } catch {}
         toast(msg, "error");
         setReprocessing(false);
@@ -326,17 +326,17 @@ export default function ResultView({ result }: ResultViewProps) {
                 onClick={() => setShowReprocess(!showReprocess)}
                 className="px-3.5 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 text-sm font-medium transition-colors shadow-sm cursor-pointer"
               >
-                Reprocess
+                Resummarize
               </button>
             )}
           </div>
         )}
       </div>
 
-      {/* Reprocess panel */}
+      {/* Resummarize panel */}
       {showReprocess && !isStreaming && (
         <div className="mb-6 bg-white border border-gray-200 rounded-xl p-5 animate-slide-down no-print">
-          <h3 className="text-sm font-medium text-gray-900 mb-3">Reprocess with different settings</h3>
+          <h3 className="text-sm font-medium text-gray-900 mb-3">Resummarize with different settings</h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1.5">Reading Time (min)</label>
@@ -388,7 +388,7 @@ export default function ResultView({ result }: ResultViewProps) {
                 Starting...
               </span>
             ) : (
-              "Reprocess"
+              "Resummarize"
             )}
           </button>
         </div>
@@ -582,7 +582,7 @@ export default function ResultView({ result }: ResultViewProps) {
           </div>
           <div className="text-center">
             <p className="text-sm font-medium text-gray-700">No content was generated</p>
-            <p className="text-xs text-gray-400 mt-1">Something went wrong during processing</p>
+            <p className="text-xs text-gray-400 mt-1">Something went wrong during summarization</p>
           </div>
           <button
             onClick={handleRetry}

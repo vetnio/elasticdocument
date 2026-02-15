@@ -68,12 +68,23 @@ export async function runOcr(fileUrl: string, userId: string): Promise<OcrResult
       for (const img of page.images) {
         if (!img.imageBase64) continue;
 
-        // Upload base64 image to Vercel Blob
-        const imageBuffer = Buffer.from(img.imageBase64, "base64");
-        const blobPath = `images/${userId}/${crypto.randomUUID()}.png`;
+        // Mistral may return a data URI (data:image/...;base64,...) or raw base64
+        let raw = img.imageBase64;
+        let contentType = "image/png";
+        const dataUriMatch = raw.match(/^data:([^;]+);base64,(.+)$/);
+        if (dataUriMatch) {
+          contentType = dataUriMatch[1];
+          raw = dataUriMatch[2];
+        }
+
+        const imageBuffer = Buffer.from(raw.trim(), "base64");
+        if (imageBuffer.length === 0) continue;
+
+        const ext = contentType.split("/")[1]?.replace("jpeg", "jpg") || "png";
+        const blobPath = `images/${userId}/${crypto.randomUUID()}.${ext}`;
         const blob = await put(blobPath, imageBuffer, {
           access: "public",
-          contentType: "image/png",
+          contentType,
         });
 
         allImageUrls.push(blob.url);
