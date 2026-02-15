@@ -42,8 +42,6 @@ export const LANGUAGES = [
 ] as const;
 
 export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
-export const MAX_EXTRACTED_IMAGES_PER_PAGE = 20;
-export const MIN_EXTRACTED_IMAGE_DIMENSION = 20; // pixels, skip tiny artifacts
 export const MAX_FILES = 10;
 
 export const USAGE_LIMIT_PER_DAY = 50;

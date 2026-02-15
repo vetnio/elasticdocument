@@ -48,6 +48,7 @@ export default async function ResultPage({ params }: { params: Promise<{ id: str
       result={{
         id: result.id,
         outputContent: result.outputContent,
+        outputBreadtext: result.outputBreadtext,
         markdownContent: result.markdownContent,
         extractedImages: result.extractedImages,
         readingMinutes: result.readingMinutes,

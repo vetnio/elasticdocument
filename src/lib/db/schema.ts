@@ -102,6 +102,7 @@ export const processedResult = pgTable(
     markdownContent: text("markdownContent").notNull(),
     extractedImages: text("extractedImages").array().notNull().default([]),
     outputContent: text("outputContent").notNull(),
+    outputBreadtext: text("outputBreadtext").notNull().default(""),
     outputImages: text("outputImages").array().notNull().default([]),
     createdAt: timestamp("createdAt").notNull().defaultNow(),
   },

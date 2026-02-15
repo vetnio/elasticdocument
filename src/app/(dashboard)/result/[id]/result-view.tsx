@@ -12,6 +12,7 @@ interface ResultViewProps {
   result: {
     id: string;
     outputContent: string;
+    outputBreadtext: string;
     markdownContent: string;
     extractedImages: string[];
     readingMinutes: number;
@@ -26,6 +27,7 @@ export default function ResultView({ result }: ResultViewProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [showRsvp, setShowRsvp] = useState(false);
+  const [activeTab, setActiveTab] = useState<"formatted" | "breadtext">("formatted");
   const [showReprocess, setShowReprocess] = useState(false);
   const [showExtraction, setShowExtraction] = useState(false);
   const [newMinutes, setNewMinutes] = useState(result.readingMinutes);
@@ -155,16 +157,6 @@ export default function ResultView({ result }: ResultViewProps) {
           >
             <svg className="w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-            </svg>
-          </button>
-          <button
-            onClick={() => setShowRsvp(true)}
-            className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
-            title="Speed Read"
-            aria-label="Speed Read"
-          >
-            <svg className="w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
             </svg>
           </button>
           <button
@@ -314,13 +306,66 @@ export default function ResultView({ result }: ResultViewProps) {
         </div>
       )}
 
-      {/* Content */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 sm:p-8 shadow-sm print-content">
-        <MarkdownRenderer content={result.outputContent} />
-      </div>
+      {/* Speed Read CTA */}
+      <button
+        onClick={() => setShowRsvp(true)}
+        className="w-full mb-6 px-6 py-3.5 bg-brand-600 text-white rounded-xl hover:bg-brand-700 active:scale-[0.99] text-sm font-semibold transition-all shadow-sm cursor-pointer flex items-center justify-center gap-2.5 no-print"
+      >
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
+        </svg>
+        Start Speed Reading
+      </button>
+
+      {/* Tabs + Content */}
+      {result.outputBreadtext ? (
+        <div>
+          <div className="flex gap-1 mb-4 no-print">
+            <button
+              onClick={() => setActiveTab("formatted")}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer ${
+                activeTab === "formatted"
+                  ? "bg-brand-600 text-white shadow-sm"
+                  : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
+              }`}
+            >
+              Formatted
+            </button>
+            <button
+              onClick={() => setActiveTab("breadtext")}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer ${
+                activeTab === "breadtext"
+                  ? "bg-brand-600 text-white shadow-sm"
+                  : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
+              }`}
+            >
+              Breadtext
+            </button>
+          </div>
+
+          {activeTab === "formatted" ? (
+            <div className="bg-white border border-gray-200 rounded-xl p-6 sm:p-8 shadow-sm print-content">
+              <MarkdownRenderer content={result.outputContent} />
+            </div>
+          ) : (
+            <div className="bg-white border border-gray-200 rounded-xl p-6 sm:p-8 shadow-sm print-content">
+              <div className="prose prose-gray max-w-none text-base leading-relaxed whitespace-pre-line">
+                {result.outputBreadtext}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="bg-white border border-gray-200 rounded-xl p-6 sm:p-8 shadow-sm print-content">
+          <MarkdownRenderer content={result.outputContent} />
+        </div>
+      )}
 
       {showRsvp && (
-        <RsvpReader content={result.outputContent} onClose={() => setShowRsvp(false)} />
+        <RsvpReader
+          content={activeTab === "breadtext" && result.outputBreadtext ? result.outputBreadtext : result.outputContent}
+          onClose={() => setShowRsvp(false)}
+        />
       )}
     </div>
   );

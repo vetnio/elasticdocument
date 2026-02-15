@@ -7,8 +7,7 @@ const requiredEnvVars = [
 ] as const;
 
 const optionalEnvVars = [
-  "HUGGINGFACE_API_KEY",
-  "HUGGINGFACE_OCR_ENDPOINT",
+  "MISTRAL_API_KEY",
 ] as const;
 
 export function validateEnv() {

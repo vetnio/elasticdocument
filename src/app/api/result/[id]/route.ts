@@ -6,7 +6,7 @@ import { document, processedResult } from "@/lib/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { runOcr } from "@/lib/ocr";
 import { scrapeUrl } from "@/lib/url-scraper";
-import { streamSummary } from "@/lib/summarize";
+import { streamSummary, BREADTEXT_DELIMITER } from "@/lib/summarize";
 
 export const maxDuration = 600;
 
@@ -176,8 +176,10 @@ export async function GET(
             }
           }
 
-          if (!combinedMarkdown.trim()) {
-            send({ type: "error", message: "No content could be extracted from the documents" });
+          // Strip document separator lines to check if there's real content
+          const contentOnly = combinedMarkdown.replace(/---\s*.+?\s*---/g, "").trim();
+          if (!contentOnly) {
+            send({ type: "error", message: "No content could be extracted from the documents. The file may be empty or unreadable." });
             send({ type: "done" });
             clearInterval(heartbeat);
             controller.close();
@@ -200,6 +202,8 @@ export async function GET(
         send({ type: "status", message: "Summarizing and restructuring..." });
 
         let fullOutput = "";
+        let hitDelimiter = false;
+        const delimiterTrimmed = BREADTEXT_DELIMITER.trim();
 
         const summaryStream = streamSummary({
           markdown: combinedMarkdown,
@@ -212,17 +216,53 @@ export async function GET(
         for await (const chunk of summaryStream) {
           if (abortSignal.aborted) return;
           fullOutput += chunk;
-          send({ type: "chunk", text: chunk });
+
+          // Only stream the formatted part (before delimiter) to the client
+          if (!hitDelimiter) {
+            if (fullOutput.includes(delimiterTrimmed)) {
+              hitDelimiter = true;
+              // Send any remaining formatted content before the delimiter
+              const delimiterIndex = fullOutput.indexOf(delimiterTrimmed);
+              const formattedSoFar = fullOutput.slice(0, delimiterIndex);
+              // We may have already sent some chunks, so we need to figure out
+              // the unsent portion. Since we track fullOutput, we'll handle this
+              // by only sending chunks that are pre-delimiter.
+              // Actually, we already sent prior chunks. The current chunk might
+              // straddle the delimiter. Send only the pre-delimiter part of this chunk.
+              const alreadySentLength = fullOutput.length - chunk.length;
+              const unsentFormatted = formattedSoFar.slice(alreadySentLength);
+              if (unsentFormatted) {
+                send({ type: "chunk", text: unsentFormatted });
+              }
+            } else {
+              send({ type: "chunk", text: chunk });
+            }
+          }
         }
 
-        // Find which images were referenced in the output
-        const usedImages = allImages.filter((img) => fullOutput.includes(img));
+        // Split the full output into formatted and breadtext
+        let formattedContent: string;
+        let breadtext: string;
 
-        // Save the final output
+        if (fullOutput.includes(delimiterTrimmed)) {
+          const delimiterIndex = fullOutput.indexOf(delimiterTrimmed);
+          formattedContent = fullOutput.slice(0, delimiterIndex).trim();
+          breadtext = fullOutput.slice(delimiterIndex + delimiterTrimmed.length).trim();
+        } else {
+          // Fallback: no delimiter found, use full output for both
+          formattedContent = fullOutput.trim();
+          breadtext = "";
+        }
+
+        // Find which images were referenced in the formatted output
+        const usedImages = allImages.filter((img) => formattedContent.includes(img));
+
+        // Save both versions
         await db
           .update(processedResult)
           .set({
-            outputContent: fullOutput,
+            outputContent: formattedContent,
+            outputBreadtext: breadtext,
             outputImages: usedImages,
           })
           .where(eq(processedResult.id, result.id));
