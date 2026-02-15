@@ -2,12 +2,89 @@ import { put } from "@vercel/blob";
 
 /**
  * Scrape a URL and return the extracted text as markdown along with the blob URL.
- * Stores the raw HTML in blob storage for reference, and converts to markdown for processing.
+ * Uses Jina Reader API to render JavaScript-heavy pages, with direct fetch as fallback.
  */
 export async function scrapeUrl(
   url: string,
   userId: string
 ): Promise<{ blobUrl: string; fileName: string; markdown: string }> {
+  // Generate a safe filename from the URL
+  const urlObj = new URL(url);
+  const fileName =
+    `${urlObj.hostname}${urlObj.pathname}`
+      .replace(/[^a-zA-Z0-9]/g, "_")
+      .slice(0, 100) + ".html";
+
+  // Try Jina Reader first (handles JS-rendered SPAs)
+  let markdown = await fetchViaJinaReader(url);
+
+  // Fallback: direct fetch + HTML-to-markdown if Jina fails or returns empty
+  if (!markdown) {
+    const { content, contentType } = await directFetch(url);
+
+    // Store in blob storage
+    const blob = await put(
+      `documents/${userId}/${crypto.randomUUID()}-${fileName}`,
+      new Blob([content], { type: contentType }),
+      { access: "public" }
+    );
+
+    const html = new TextDecoder().decode(content);
+    markdown = htmlToMarkdown(html);
+
+    return { blobUrl: blob.url, fileName, markdown };
+  }
+
+  // Store the Jina Reader markdown in blob storage for reference
+  const blob = await put(
+    `documents/${userId}/${crypto.randomUUID()}-${fileName}`,
+    new Blob([markdown], { type: "text/markdown" }),
+    { access: "public" }
+  );
+
+  return { blobUrl: blob.url, fileName, markdown };
+}
+
+/**
+ * Fetch a URL via Jina Reader API which renders JavaScript and returns markdown.
+ * Returns the markdown string, or empty string if the request fails.
+ */
+async function fetchViaJinaReader(url: string): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+
+  try {
+    const response = await fetch(`https://r.jina.ai/${url}`, {
+      headers: {
+        Accept: "text/markdown",
+      },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return "";
+    }
+
+    const text = await response.text();
+
+    // Check if the result has meaningful content
+    const stripped = text.replace(/\s+/g, " ").trim();
+    if (stripped.length < 50) {
+      return "";
+    }
+
+    return text;
+  } catch {
+    return "";
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Direct HTTP fetch of a URL. Used as fallback when Jina Reader fails.
+ */
+async function directFetch(url: string): Promise<{ content: ArrayBuffer; contentType: string }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
 
@@ -26,25 +103,7 @@ export async function scrapeUrl(
     const contentType = response.headers.get("content-type") || "text/html";
     const content = await response.arrayBuffer();
 
-    // Generate a safe filename from the URL
-    const urlObj = new URL(url);
-    const fileName =
-      `${urlObj.hostname}${urlObj.pathname}`
-        .replace(/[^a-zA-Z0-9]/g, "_")
-        .slice(0, 100) + ".html";
-
-    // Store the scraped content in blob storage
-    const blob = await put(
-      `documents/${userId}/${crypto.randomUUID()}-${fileName}`,
-      new Blob([content], { type: contentType }),
-      { access: "public" }
-    );
-
-    // Convert HTML to markdown-ish text for processing
-    const html = new TextDecoder().decode(content);
-    const markdown = htmlToMarkdown(html);
-
-    return { blobUrl: blob.url, fileName, markdown };
+    return { content, contentType };
   } finally {
     clearTimeout(timeout);
   }
