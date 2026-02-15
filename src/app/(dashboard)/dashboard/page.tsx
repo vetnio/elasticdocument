@@ -167,7 +167,7 @@ export default function DashboardPage() {
       }
 
       const data = await res.json();
-      router.push(`/process/${data.resultId}`);
+      router.push(`/result/${data.resultId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
       setUploadProgress(null);

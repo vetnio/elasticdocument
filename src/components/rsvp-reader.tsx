@@ -83,10 +83,22 @@ function formatTime(ms: number): string {
 interface RsvpReaderProps {
   content: string;
   onClose: () => void;
+  isStreaming?: boolean;
 }
 
-export default function RsvpReader({ content, onClose }: RsvpReaderProps) {
-  const tokens = useRef(parseMarkdownToTokens(content)).current;
+export default function RsvpReader({ content, onClose, isStreaming = false }: RsvpReaderProps) {
+  // Debounce content re-parses during streaming to avoid thrashing
+  const [debouncedContent, setDebouncedContent] = useState(content);
+  useEffect(() => {
+    if (!isStreaming) {
+      setDebouncedContent(content);
+      return;
+    }
+    const timer = setTimeout(() => setDebouncedContent(content), 300);
+    return () => clearTimeout(timer);
+  }, [content, isStreaming]);
+
+  const tokens = useMemo(() => parseMarkdownToTokens(debouncedContent), [debouncedContent]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [wpm, setWpm] = useState(300);
@@ -96,6 +108,7 @@ export default function RsvpReader({ content, onClose }: RsvpReaderProps) {
   const [wpmFlash, setWpmFlash] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const hasStartedRef = useRef(false);
+  const wasWaitingRef = useRef(false);
   const triggerRef = useRef<Element | null>(null);
   const imageTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const imageStartRef = useRef<number>(0);
@@ -174,7 +187,16 @@ export default function RsvpReader({ content, onClose }: RsvpReaderProps) {
   useEffect(() => {
     if (!isPlaying || !currentToken || currentToken.type === "image") return;
 
-    const delay = getWordDelay(currentToken.text, wpm);
+    // At end of available content while streaming — wait for more tokens
+    if (currentIndex >= tokens.length - 1 && isStreaming) {
+      wasWaitingRef.current = true;
+      return;
+    }
+
+    // Skip delay when resuming after a wait (user already saw this word)
+    const delay = wasWaitingRef.current ? 0 : getWordDelay(currentToken.text, wpm);
+    wasWaitingRef.current = false;
+
     const timer = setTimeout(() => {
       if (currentIndex < tokens.length - 1) {
         setCurrentIndex((i) => i + 1);
@@ -184,7 +206,7 @@ export default function RsvpReader({ content, onClose }: RsvpReaderProps) {
     }, delay);
 
     return () => clearTimeout(timer);
-  }, [isPlaying, currentIndex, wpm, currentToken, tokens.length]);
+  }, [isPlaying, currentIndex, wpm, currentToken, tokens.length, isStreaming]);
 
   // --- Image timing ---
   const clearImageTimer = useCallback(() => {
@@ -218,7 +240,7 @@ export default function RsvpReader({ content, onClose }: RsvpReaderProps) {
         setImageLoaded(false);
         if (currentIndex < tokens.length - 1) {
           setCurrentIndex((i) => i + 1);
-        } else {
+        } else if (!isStreaming) {
           setIsPlaying(false);
         }
       } else {
@@ -227,7 +249,7 @@ export default function RsvpReader({ content, onClose }: RsvpReaderProps) {
     }, 50);
 
     return clearImageTimer;
-  }, [isPlaying, currentToken, imageLoaded, currentIndex, tokens.length, clearImageTimer, imageTimeRemaining]);
+  }, [isPlaying, currentToken, imageLoaded, currentIndex, tokens.length, clearImageTimer, imageTimeRemaining, isStreaming]);
 
   // --- Sentence navigation ---
   const skipToPrevSentence = useCallback(() => {
@@ -329,6 +351,7 @@ export default function RsvpReader({ content, onClose }: RsvpReaderProps) {
 
   // --- Progress ---
   const progress = tokens.length > 0 ? ((currentIndex + 1) / tokens.length) * 100 : 0;
+  const isWaitingForContent = isStreaming && currentIndex >= tokens.length - 1 && tokens.length > 0;
 
   // --- Render ---
   return createPortal(
@@ -340,12 +363,13 @@ export default function RsvpReader({ content, onClose }: RsvpReaderProps) {
             {wpm} <span className="text-gray-400 font-normal">WPM</span>
           </span>
           <span className="text-xs text-gray-400 tabular-nums">
-            {formatTime(timeRemaining)} left
+            {formatTime(timeRemaining)}{isStreaming ? "+" : ""} left
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-400 tabular-nums">
+          <span className="text-xs text-gray-400 tabular-nums inline-flex items-center gap-1.5">
             {currentIndex + 1} / {tokens.length}
+            {isStreaming && <span className="inline-block w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />}
           </span>
           <button
             onClick={onClose}
@@ -401,6 +425,15 @@ export default function RsvpReader({ content, onClose }: RsvpReaderProps) {
                   <span> {contextWords.after.join(" ")}</span>
                 )}
               </p>
+            )}
+            {isWaitingForContent && (
+              <div className="flex items-center gap-2 text-gray-400 text-sm">
+                <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span>Waiting for more content...</span>
+              </div>
             )}
           </div>
         ) : null}

@@ -38,17 +38,12 @@ export default async function ResultPage({ params }: { params: Promise<{ id: str
     redirect("/history");
   }
 
-  // If not yet processed, redirect to process page
-  if (!result.outputContent) {
-    redirect(`/process/${id}`);
-  }
-
   return (
     <ResultView
       result={{
         id: result.id,
-        outputContent: result.outputContent,
-        outputBreadtext: result.outputBreadtext,
+        outputContent: result.outputContent ?? "",
+        outputBreadtext: result.outputBreadtext ?? "",
         markdownContent: result.markdownContent,
         extractedImages: result.extractedImages,
         readingMinutes: result.readingMinutes,
@@ -56,6 +51,7 @@ export default async function ResultPage({ params }: { params: Promise<{ id: str
         outputLanguage: result.outputLanguage,
         createdAt: result.createdAt.toISOString(),
         documents: result.documentToProcessedResults.map((dtr) => dtr.document),
+        needsProcessing: !result.outputContent,
       }}
     />
   );

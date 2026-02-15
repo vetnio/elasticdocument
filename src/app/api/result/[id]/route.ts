@@ -6,7 +6,7 @@ import { document, processedResult } from "@/lib/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { runOcr } from "@/lib/ocr";
 import { scrapeUrl } from "@/lib/url-scraper";
-import { streamSummary, BREADTEXT_DELIMITER } from "@/lib/summarize";
+import { streamFormattedSummary, streamBreadtextSummary } from "@/lib/summarize";
 
 export const maxDuration = 600;
 
@@ -45,6 +45,9 @@ export async function GET(
         );
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({ type: "content", text: result.outputContent })}\n\n`)
+        );
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "breadtext", text: result.outputBreadtext })}\n\n`)
         );
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({ type: "images", images: result.outputImages })}\n\n`)
@@ -217,64 +220,80 @@ export async function GET(
 
         if (abortSignal.aborted) return;
 
-        // Step 3: Summarize with Claude (streaming)
+        // Step 3: Summarize with Claude — stream formatted and breadtext in parallel
         send({ type: "status", message: "Summarizing and restructuring..." });
 
-        let fullOutput = "";
-        let hitDelimiter = false;
-        const delimiterTrimmed = BREADTEXT_DELIMITER.trim();
-
-        const summaryStream = streamSummary({
+        const summarizeParams = {
           markdown: combinedMarkdown,
           images: allImages,
           readingMinutes: result.readingMinutes,
           complexity: result.complexityLevel,
           language: result.outputLanguage,
-        });
+        };
 
-        for await (const chunk of summaryStream) {
-          if (abortSignal.aborted) return;
-          fullOutput += chunk;
+        // Parallel streaming with a shared push queue
+        const pending: Array<object> = [];
+        const q = { notify: null as (() => void) | null, fmtDone: false, btDone: false };
 
-          // Only stream the formatted part (before delimiter) to the client
-          if (!hitDelimiter) {
-            if (fullOutput.includes(delimiterTrimmed)) {
-              hitDelimiter = true;
-              // Send any remaining formatted content before the delimiter
-              const delimiterIndex = fullOutput.indexOf(delimiterTrimmed);
-              const formattedSoFar = fullOutput.slice(0, delimiterIndex);
-              // We may have already sent some chunks, so we need to figure out
-              // the unsent portion. Since we track fullOutput, we'll handle this
-              // by only sending chunks that are pre-delimiter.
-              // Actually, we already sent prior chunks. The current chunk might
-              // straddle the delimiter. Send only the pre-delimiter part of this chunk.
-              const alreadySentLength = fullOutput.length - chunk.length;
-              const unsentFormatted = formattedSoFar.slice(alreadySentLength);
-              if (unsentFormatted) {
-                send({ type: "chunk", text: unsentFormatted });
-              }
-            } else {
-              send({ type: "chunk", text: chunk });
+        function push(item: object) {
+          pending.push(item);
+          q.notify?.();
+        }
+
+        let formattedContent = "";
+        let breadtext = "";
+
+        // Start both streams concurrently
+        const p1 = (async () => {
+          try {
+            for await (const chunk of streamFormattedSummary(summarizeParams)) {
+              if (abortSignal.aborted) return;
+              formattedContent += chunk;
+              push({ type: "formatted_chunk", text: chunk });
             }
+          } catch {
+            // Formatted stream failed — will be handled below
+          }
+          q.fmtDone = true;
+          q.notify?.();
+        })();
+
+        const p2 = (async () => {
+          try {
+            for await (const chunk of streamBreadtextSummary(summarizeParams)) {
+              if (abortSignal.aborted) return;
+              breadtext += chunk;
+              push({ type: "breadtext_chunk", text: chunk });
+            }
+          } catch {
+            // Breadtext stream failed — not critical
+          }
+          q.btDone = true;
+          q.notify?.();
+        })();
+
+        // Drain loop — interleave chunks from both streams into SSE
+        while (!q.fmtDone || !q.btDone) {
+          if (abortSignal.aborted) return;
+          if (pending.length === 0) {
+            await new Promise<void>((r) => { q.notify = r; });
+            q.notify = null;
+          }
+          while (pending.length > 0) {
+            send(pending.shift()!);
           }
         }
-
-        // Split the full output into formatted and breadtext
-        let formattedContent: string;
-        let breadtext: string;
-
-        if (fullOutput.includes(delimiterTrimmed)) {
-          const delimiterIndex = fullOutput.indexOf(delimiterTrimmed);
-          formattedContent = fullOutput.slice(0, delimiterIndex).trim();
-          breadtext = fullOutput.slice(delimiterIndex + delimiterTrimmed.length).trim();
-        } else {
-          // Fallback: no delimiter found, use full output for both
-          formattedContent = fullOutput.trim();
-          breadtext = "";
+        // Flush remaining
+        while (pending.length > 0) {
+          send(pending.shift()!);
         }
 
+        await Promise.all([p1, p2]);
+
+        formattedContent = formattedContent.trim();
+        breadtext = breadtext.trim();
+
         // If Claude returned the "empty document" canned response, don't cache it
-        // so the result can be retried after fixing the underlying issue.
         const isEmptyResponse = formattedContent.includes("appears to be empty or could not be read");
         if (isEmptyResponse) {
           await db
@@ -287,6 +306,11 @@ export async function GET(
           abortSignal.removeEventListener("abort", onAbort);
           controller.close();
           return;
+        }
+
+        // Discard breadtext if it's an "empty" response
+        if (breadtext.includes("appears to be empty or could not be read")) {
+          breadtext = "";
         }
 
         // Find which images were referenced in the formatted output

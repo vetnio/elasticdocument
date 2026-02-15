@@ -114,7 +114,7 @@ export default function HistoryList({ results: initialResults }: { results: Hist
   }
 
   function navigateToResult(result: HistoryResult) {
-    router.push(result.hasOutput ? `/result/${result.id}` : `/process/${result.id}`);
+    router.push(`/result/${result.id}`);
   }
 
   if (results.length === 0) {
