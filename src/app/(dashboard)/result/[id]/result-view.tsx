@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import MarkdownRenderer from "@/components/markdown-renderer";
+import RsvpReader from "@/components/rsvp-reader";
 import { useToast } from "@/components/toast";
 import { COMPLEXITY_LEVELS, LANGUAGES } from "@/lib/constants";
 import { formatRelativeDate } from "@/lib/format-date";
@@ -24,6 +25,7 @@ interface ResultViewProps {
 export default function ResultView({ result }: ResultViewProps) {
   const router = useRouter();
   const { toast } = useToast();
+  const [showRsvp, setShowRsvp] = useState(false);
   const [showReprocess, setShowReprocess] = useState(false);
   const [showExtraction, setShowExtraction] = useState(false);
   const [newMinutes, setNewMinutes] = useState(result.readingMinutes);
@@ -153,6 +155,16 @@ export default function ResultView({ result }: ResultViewProps) {
           >
             <svg className="w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+          </button>
+          <button
+            onClick={() => setShowRsvp(true)}
+            className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
+            title="Speed Read"
+            aria-label="Speed Read"
+          >
+            <svg className="w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
             </svg>
           </button>
           <button
@@ -306,6 +318,10 @@ export default function ResultView({ result }: ResultViewProps) {
       <div className="bg-white border border-gray-200 rounded-xl p-6 sm:p-8 shadow-sm print-content">
         <MarkdownRenderer content={result.outputContent} />
       </div>
+
+      {showRsvp && (
+        <RsvpReader content={result.outputContent} onClose={() => setShowRsvp(false)} />
+      )}
     </div>
   );
 }
